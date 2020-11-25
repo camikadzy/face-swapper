@@ -1,0 +1,7 @@
+import telegram
+from Sources.Util.Configs import get_telegram_token
+
+
+class Bot:
+    def __init__(self):
+        self.bot = telegram.Bot(get_telegram_token())

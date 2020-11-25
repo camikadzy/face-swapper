@@ -1,0 +1,12 @@
+pip~=20.2.4
+cryptography~=3.2.1
+pytz~=2020.4
+certifi~=2020.11.8
+tornado~=6.1
+tzlocal~=2.1
+APScheduler~=3.6.3
+decorator~=4.4.2
+six~=1.15.0
+pycparser~=2.20
+setuptools~=50.3.2
+python-telegram-bot~=13.0
