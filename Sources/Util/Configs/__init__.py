@@ -1,6 +1,8 @@
 import json
+from defenitions import ROOT_DIR
+home = ROOT_DIR
 
-f = open("config.json")
+f = open(f"{home}/config.json")
 serialized_json = json.load(f)
 
 

@@ -10,3 +10,7 @@ six~=1.15.0
 pycparser~=2.20
 setuptools~=50.3.2
 python-telegram-bot~=13.0
+numpy~=1.19.4
+opencv-python~=4.4.0.46
+scipy~=1.5.4
+dlib~=19.21.0

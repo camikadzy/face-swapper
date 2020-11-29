@@ -1,4 +1,17 @@
 import face_recognition
+import numpy as np
+import cv2
+import scipy.spatial as spatial
+import logging
+import dlib
+import time
+
+from defenitions import ROOT_DIR
+home = ROOT_DIR
+
+PREDICTOR_PATH = f'{home}/ml_data/shape_predictor_68_face_landmarks.dat'
+predictor = dlib.shape_predictor(PREDICTOR_PATH)
+
 
 ## 3D Transform
 def bilinear_interpolate(img, coords):
@@ -23,6 +36,7 @@ def bilinear_interpolate(img, coords):
     inter_pixel = top * dy + btm * (1 - dy)
 
     return inter_pixel.T
+
 
 def grid_coordinates(points):
     """ x,y grid coordinates within the ROI of supplied points
@@ -107,7 +121,7 @@ def transformation_from_points(points1, points2):
     R = (np.dot(U, Vt)).T
 
     return np.vstack([np.hstack([s2 / s1 * R,
-                                (c2.T - np.dot(s2 / s1 * R, c1.T))[:, np.newaxis]]),
+                                 (c2.T - np.dot(s2 / s1 * R, c1.T))[:, np.newaxis]]),
                       np.array([[0., 0., 1.]])])
 
 
@@ -124,14 +138,14 @@ def warp_image_2d(im, M, dshape):
 
 
 ## Generate Mask
-def mask_from_points(size, points,erode_flag=1):
+def mask_from_points(size, points, erode_flag=1):
     radius = 10  # kernel size
     kernel = np.ones((radius, radius), np.uint8)
 
     mask = np.zeros(size, np.uint8)
     cv2.fillConvexPoly(mask, cv2.convexHull(points), 255)
     if erode_flag:
-        mask = cv2.erode(mask, kernel,iterations=1)
+        mask = cv2.erode(mask, kernel, iterations=1)
 
     return mask
 
@@ -143,8 +157,8 @@ def correct_colours(im1, im2, landmarks1):
     RIGHT_EYE_POINTS = list(range(36, 42))
 
     blur_amount = COLOUR_CORRECT_BLUR_FRAC * np.linalg.norm(
-                              np.mean(landmarks1[LEFT_EYE_POINTS], axis=0) -
-                              np.mean(landmarks1[RIGHT_EYE_POINTS], axis=0))
+        np.mean(landmarks1[LEFT_EYE_POINTS], axis=0) -
+        np.mean(landmarks1[RIGHT_EYE_POINTS], axis=0))
     blur_amount = int(blur_amount)
     if blur_amount % 2 == 0:
         blur_amount += 1
@@ -153,7 +167,7 @@ def correct_colours(im1, im2, landmarks1):
 
     # Avoid divide-by-zero errors.
     im2_blur = im2_blur.astype(int)
-    im2_blur += 128*(im2_blur <= 1)
+    im2_blur += 128 * (im2_blur <= 1)
 
     result = im2.astype(np.float64) * im1_blur.astype(np.float64) / im2_blur.astype(np.float64)
     result = np.clip(result, 0, 255).astype(np.uint8)
@@ -168,7 +182,7 @@ def apply_mask(img, mask):
     :param mask: [0-255] values in mask
     :returns: new image with mask applied
     """
-    masked_img=cv2.bitwise_and(img,img,mask=mask)
+    masked_img = cv2.bitwise_and(img, img, mask=mask)
 
     return masked_img
 
@@ -180,14 +194,14 @@ def alpha_feathering(src_img, dest_img, img_mask, blur_radius=15):
 
     result_img = np.empty(src_img.shape, np.uint8)
     for i in range(3):
-        result_img[..., i] = src_img[..., i] * mask + dest_img[..., i] * (1-mask)
+        result_img[..., i] = src_img[..., i] * mask + dest_img[..., i] * (1 - mask)
 
     return result_img
 
 
-def check_points(img,points):
+def check_points(img, points):
     # Todo: I just consider one situation.
-    if points[8,1]>img.shape[0]:
+    if points[8, 1] > img.shape[0]:
         logging.error("Jaw part out of image")
     else:
         return True
@@ -209,7 +223,7 @@ def face_swap(src_face, dst_face, src_points, dst_points, dst_shape, dst_img, ar
         dst_face_masked = apply_mask(dst_face, mask)
         warped_src_face = correct_colours(dst_face_masked, warped_src_face, dst_points)
     ## 2d warp
-    if args=='warp_2d':
+    if args == 'warp_2d':
         unwarped_src_face = warp_image_3d(warped_src_face, dst_points[:end], src_points[:end], src_face.shape[:2])
         warped_src_face = warp_image_2d(unwarped_src_face, transformation_from_points(dst_points, src_points),
                                         (h, w, 3))
@@ -231,3 +245,96 @@ def face_swap(src_face, dst_face, src_points, dst_points, dst_shape, dst_img, ar
     dst_img_cp[y:y + h, x:x + w] = output
 
     return dst_img_cp
+
+
+## Face detection
+def face_detection(img, upsample_times=1):
+    # Ask the detector to find the bounding boxes of each face. The 1 in the
+    # second argument indicates that we should upsample the image 1 time. This
+    # will make everything bigger and allow us to detect more faces.
+    detector = dlib.get_frontal_face_detector()
+    faces = detector(img, upsample_times)
+
+    return faces
+
+
+## Face and points detection
+def face_points_detection(img, bbox: dlib.rectangle):
+    # Get the landmarks/parts for the face in box d.
+    shape = predictor(img, bbox)
+
+    # loop over the 68 facial landmarks and convert them
+    # to a 2-tuple of (x, y)-coordinates
+    coords = np.asarray(list([p.x, p.y] for p in shape.parts()), dtype=np.int)
+
+    # return the array of (x, y)-coordinates
+    return coords
+
+
+def select_face(im, cords, r=10):
+    #
+    face = dlib.rectangle(*cords)
+    points = np.asarray(face_points_detection(im, face))
+    im_w, im_h = im.shape[:2]
+    left, top = np.min(points, 0)
+    right, bottom = np.max(points, 0)
+    x, y = max(0, left - r), max(0, top - r)
+    w, h = min(right + r, im_h) - x, min(bottom + r, im_w) - y
+    p = points - np.asarray([[x, y]])
+    s = ((x, y, w, h))
+    f = (im[y:y + h, x:x + w])
+    return p, s, f
+
+
+def get_smeared_faces(chat_id, pic_name):
+    pic_dl = face_recognition.load_image_file(pic_name)
+    pic = cv2.imread(pic_name)
+    coords = []
+    face_locations = face_recognition.face_locations(pic_dl)
+    for ind, face in enumerate(face_locations):
+        pat = pic[face[0]:face[2], face[3]:face[1]]
+        cv2.imwrite(f"{home}/faces/{chat_id}_{str(ind)}.jpg", pat)
+        coords.append((face[3], face[0], face[1], face[2]))
+    return ind + 1, coords, pic, pic_dl
+
+
+def swap(pic, pic_dl, target_coords, imagecv, frames, patterns):
+    src_points, src_shape, src_face = select_face(pic, target_coords)
+    pic_dl = pic_dl[target_coords[1]:target_coords[3], target_coords[0]:target_coords[2]]
+    dl_encoding = face_recognition.face_encodings(pic_dl)[0]
+
+    for ind, pat in enumerate(patterns):
+        if face_recognition.compare_faces(pat, dl_encoding)[0]:
+            dst_points, dst_shape, dst_face = select_face(imagecv, frames[ind])
+            imagecv = face_swap(src_face, dst_face, src_points, dst_points, dst_shape, imagecv, 'correct_color')
+            # cv2.imshow(imagecv)
+            break
+    return imagecv
+
+
+def final_swap_and_clear(target_photo: str, users_with_photos: list) -> str:
+    image = face_recognition.load_image_file(target_photo)
+    imagecv = cv2.imread(target_photo)
+
+    face_locations = face_recognition.face_locations(image)
+    patterns = []
+    frames = []
+    for face in face_locations:
+        pat = imagecv[face[0]:face[2], face[3]:face[1]]
+        frames.append((face[3], face[0], face[1], face[2]))
+        face_rec = face_recognition.face_encodings(pat)
+        if face_rec:
+            patterns.append([face_rec[0]])
+
+    niggas_gang = []
+    for n, pic_name, coords, pic, pic_dl in users_with_photos:
+        target_coords = coords[n]
+        niggas_gang.append((pic, pic_dl, target_coords))
+
+    for nigga in niggas_gang:
+        imagecv = swap(*nigga, imagecv, patterns, frames)
+
+    result_name = f"{home}/results/{str(time.time())}.jpg"
+    cv2.imwrite(result_name, imagecv)
+
+    return result_name
