@@ -286,8 +286,8 @@ class SwapBot:
                                            self.marked_photo_data)
 
         for chat in self.chats_ids_with_choices:
-            self.updater.bot.send_photo(chat_id=chat, photo=open(result_file, 'rb'))
-            self.updater.bot.send_photo(chat_id=chat, photo=open(result_file2, 'rb'))
+            self.updater.bot.send_document(chat_id=chat, document=open(result_file, 'rb'), timeout=100000)
+            self.updater.bot.send_document(chat_id=chat, document=open(result_file2, 'rb'), timeout=100000)
 
         self.clear_all()
 
